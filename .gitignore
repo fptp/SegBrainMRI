@@ -1,0 +1,91 @@
+# =====================================================================
+#  DONNÉES MÉDICALES — NE JAMAIS VERSIONNER (RGPD / secret médical)
+# =====================================================================
+*.nii
+*.nii.gz
+*.mgz
+*.mgh
+*.mnc
+*.img
+*.hdr
+*.nrrd
+*.nhdr
+*.mha
+*.mhd
+*.raw
+*.dcm
+*.dicom
+*.IMA
+*.ima
+*.par
+*.rec
+*.bval
+*.bvec
+DICOM/
+dicom/
+# Tableaux pouvant contenir des métadonnées patients
+*.tsv
+*.csv
+# Dossiers de données (seuls les .gitkeep sont conservés)
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# =====================================================================
+#  POIDS DE MODÈLES / ARTEFACTS D'ENTRAÎNEMENT
+# =====================================================================
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.safetensors
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.npz
+*.npy
+*.zip
+*.tar
+*.tar.gz
+weights/**
+!weights/.gitkeep
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+runs/
+lightning_logs/
+mlruns/
+wandb/
+checkpoints/
+
+# =====================================================================
+#  PYTHON
+# =====================================================================
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# =====================================================================
+#  ÉDITEURS / OS / SECRETS
+# =====================================================================
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.env
+*.log

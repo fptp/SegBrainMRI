@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "segbrainmri"
+version = "0.1.0"
+description = "Segmentation des lésions de Sclérose en Plaques (SEP) sur IRM cérébrale (FLAIR/T1), CPU par défaut, CUDA si disponible."
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["MRI", "multiple sclerosis", "segmentation", "PyTorch", "NIfTI"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "numpy>=1.24",
+    "SimpleITK>=2.3",
+    "nibabel>=5.0",
+    # torch est installé séparément (roue CPU ou CUDA) : voir README.md
+    "torch>=2.1",
+]
+
+[project.optional-dependencies]
+monai = ["monai>=1.3"]
+dev = ["pytest>=7.4", "pytest-cov", "ruff>=0.5"]
+
+[project.scripts]
+segbrainmri = "segbrainmri.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
