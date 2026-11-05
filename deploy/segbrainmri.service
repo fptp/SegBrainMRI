@@ -1,0 +1,27 @@
+[Unit]
+Description=SegBrainMRI - segmentation automatique des lesions SEP (DICOM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=segbrainmri
+Group=segbrainmri
+Environment=PYTHONUNBUFFERED=1 MPLBACKEND=Agg
+ExecStart=/opt/segbrainmri/venv/bin/segbrainmri serve --config /etc/segbrainmri/config.toml
+Restart=on-failure
+RestartSec=10
+# Laisse le temps de finir la série en cours avant l'arrêt
+TimeoutStopSec=1800
+KillSignal=SIGTERM
+
+# Durcissement
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/segbrainmri
+ReadOnlyPaths=/opt/segbrainmri /etc/segbrainmri
+
+[Install]
+WantedBy=multi-user.target

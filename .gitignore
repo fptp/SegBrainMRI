@@ -21,8 +21,8 @@
 *.rec
 *.bval
 *.bvec
-DICOM/
-dicom/
+/DICOM/
+/dicom/
 # Tableaux pouvant contenir des métadonnées patients
 *.tsv
 *.csv

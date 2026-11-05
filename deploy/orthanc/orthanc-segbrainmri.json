@@ -1,0 +1,10 @@
+{
+  "DicomModalities": {
+    "segbrainmri": {
+      "AET": "SEGBRAINMRI",
+      "Host": "ADRESSE_IP_DE_LA_VM_SEGBRAINMRI",
+      "Port": 11112
+    }
+  },
+  "LuaScripts": ["/etc/orthanc/segbrainmri.lua"]
+}
