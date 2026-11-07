@@ -1,0 +1,35 @@
+# Configuration du service SegBrainMRI : copier dans /etc/segbrainmri/config.toml
+
+[listener]
+# Serveur DICOM de cette VM, qui reçoit les FLAIR envoyées par Orthanc
+ae_title = "SEGBRAINMRI"
+host = "0.0.0.0"
+port = 11112
+# AET autorisés à envoyer des images (vide = tout le monde)
+allowed_calling_aets = ["ORTHANC"]
+
+[orthanc]
+# Destination des résultats (port DICOM d'Orthanc)
+host = "192.168.10.172"
+port = 4242
+ae_title = "ORTHANC"
+
+[processing]
+spool_dir = "/var/lib/segbrainmri"
+# Une série est traitée quand plus aucune image n'arrive depuis N secondes
+settle_seconds = 20
+device = "auto"          # auto | cpu | cuda | cuda:0
+# threads = 8            # threads CPU PyTorch (défaut : automatique)
+flair_patterns = ["flair", "dark[ _-]?fluid", "t2[ _-]?fl", "spcir"]
+keep_inputs = false      # supprimer les images reçues après un traitement réussi
+
+[model]
+backend = "flames"
+models_dir = "/opt/segbrainmri/models"
+tta = "auto"             # augmentation au test : GPU seulement (8x plus lent sur CPU)
+skull_strip = true
+
+[output]
+seg = true               # DICOM SEG (OHIF, Stone Web Viewer, 3D Slicer, Weasis)
+overlay = true           # série couleur FLAIR + lésions en rouge (toute visionneuse)
+overlay_opacity = 0.5

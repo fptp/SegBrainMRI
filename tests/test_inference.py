@@ -57,7 +57,8 @@ def test_cli_info(capsys):
 
 
 def test_cli_segment_requires_weights(flair_path, tmp_path):
-    assert main(["segment", "--flair", str(flair_path), "-o", str(tmp_path)]) == 2
+    args = ["segment", "--model", "unet3d", "--flair", str(flair_path), "-o", str(tmp_path)]
+    assert main(args) == 2
 
 
 def test_cli_segment_untrained(flair_path, tmp_path):
@@ -70,6 +71,8 @@ def test_cli_segment_untrained(flair_path, tmp_path):
             str(flair_path),
             "-o",
             str(tmp_path / "o"),
+            "--model",
+            "unet3d",
             "--untrained",
             "--spacing",
             "2",

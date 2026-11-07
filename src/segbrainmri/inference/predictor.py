@@ -14,6 +14,7 @@ import torch
 
 from segbrainmri.core.device import autocast, get_device
 from segbrainmri.inference.sliding_window import sliding_window_inference
+from segbrainmri.inference.stats import lesion_statistics
 from segbrainmri.models.base import SegmentationModel
 from segbrainmri.preprocessing import PreprocessingPipeline, save_nifti
 
@@ -36,17 +37,6 @@ class SegmentationResult:
             "mask": save_nifti(self.mask, output_dir / f"{prefix}_mask.nii.gz"),
             "probabilities": save_nifti(self.probabilities, output_dir / f"{prefix}_prob.nii.gz"),
         }
-
-
-def lesion_statistics(mask: sitk.Image, min_size_voxels: int = 3) -> tuple[int, float]:
-    """Nombre de lésions (composantes 26-connexes) et volume lésionnel total en mL."""
-    cc = sitk.ConnectedComponentImageFilter()
-    cc.SetFullyConnected(True)
-    components = sitk.RelabelComponent(cc.Execute(mask), minimumObjectSize=min_size_voxels)
-    count = int(sitk.GetArrayViewFromImage(components).max())
-    voxel_ml = float(np.prod(mask.GetSpacing())) / 1000.0
-    volume = float((sitk.GetArrayViewFromImage(mask) > 0).sum()) * voxel_ml
-    return count, volume
 
 
 class LesionSegmenter:

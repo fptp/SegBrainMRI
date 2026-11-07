@@ -132,8 +132,7 @@ def get_device(
         logger.info("Calcul sur CPU : %s", describe_device(device))
         logger.warning(
             "Aucun GPU utilisé : l'inférence 3D sur IRM cérébrale peut prendre plusieurs "
-            "minutes par patient et consommer beaucoup de RAM. Réduisez la taille des patchs "
-            "(--patch-size) si la mémoire est insuffisante."
+            "minutes par patient (FLAMeS : ~5 à 20 min sur CPU) et consommer beaucoup de RAM."
         )
     return device
 

@@ -1,9 +1,13 @@
 """Interface en ligne de commande ``segbrainmri``.
 
 Sous-commandes :
-    info        affiche l'appareil détecté (CPU/GPU) et les versions ;
-    preprocess  prétraite un scan et écrit les volumes normalisés ;
-    segment     segmente les lésions de SEP et écrit le masque NIfTI.
+    info             appareil détecté (CPU/GPU) et versions ;
+    download-models  télécharge FLAMeS et SynthStrip ;
+    serve            service DICOM : reçoit les FLAIR, segmente, renvoie à Orthanc ;
+    process-dicom    traite une fois un dossier DICOM (et envoie à Orthanc si --send) ;
+    echo             teste la connexion DICOM avec Orthanc (C-ECHO) ;
+    preprocess       prétraite un scan NIfTI ;
+    segment          segmente un scan NIfTI et écrit le masque.
 """
 
 from __future__ import annotations
@@ -83,12 +87,16 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
 
 def cmd_segment(args: argparse.Namespace) -> int:
     from segbrainmri.core.device import get_device
+
+    inputs = _inputs(args)
+    device = get_device(args.device, num_threads=args.threads)
+    if args.model == "flames":
+        return _segment_flames(args, device)
+
     from segbrainmri.inference import LesionSegmenter
     from segbrainmri.models import build_model
     from segbrainmri.preprocessing import PreprocessingPipeline
 
-    inputs = _inputs(args)
-    device = get_device(args.device, num_threads=args.threads)
     model = build_model(args.model, in_channels=len(inputs))
     if args.weights is not None:
         model.load_weights(args.weights, device)
@@ -111,6 +119,70 @@ def cmd_segment(args: argparse.Namespace) -> int:
     print(f"Masque       : {paths['mask']}")
     print(f"Probabilités : {paths['probabilities']}")
     print(f"Lésions      : {result.lesion_count} ({result.lesion_volume_ml:.2f} mL)")
+    return 0
+
+
+def _segment_flames(args: argparse.Namespace, device) -> int:
+    from segbrainmri.inference.stats import lesion_statistics
+    from segbrainmri.models.flames import FlamesBackend
+    from segbrainmri.preprocessing import load_nifti, save_nifti
+
+    if args.t1 is not None:
+        logger.warning("FLAMeS n'utilise que la FLAIR : --t1 est ignorée.")
+    backend = FlamesBackend(
+        args.models_dir, device=device, threads=args.threads, skull_strip=not args.no_skull_strip
+    )
+    mask = backend.segment(load_nifti(args.flair))
+    path = save_nifti(mask, args.output / f"{args.prefix}_mask.nii.gz")
+    count, volume = lesion_statistics(mask)
+    print(f"Masque       : {path}")
+    print(f"Lésions      : {count} ({volume:.2f} mL)")
+    return 0
+
+
+def _service_config(args: argparse.Namespace):
+    from segbrainmri.service.config import ServiceConfig
+
+    config = ServiceConfig.load(args.config)
+    if args.device:
+        config.processing.device = args.device
+    return config
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    from segbrainmri.service.app import serve
+
+    serve(_service_config(args))
+    return 0
+
+
+def cmd_process_dicom(args: argparse.Namespace) -> int:
+    from segbrainmri.service.worker import build_backend, process_series
+
+    config = _service_config(args)
+    results = process_series(args.input, build_backend(config), config, send=args.send)
+    if args.output:
+        args.output.mkdir(parents=True, exist_ok=True)
+        for ds in results:
+            ds.save_as(args.output / f"{ds.SOPInstanceUID}.dcm", enforce_file_format=True)
+        print(f"{len(results)} fichier(s) DICOM écrit(s) dans {args.output}")
+    return 0
+
+
+def cmd_echo(args: argparse.Namespace) -> int:
+    from segbrainmri.dicom.network import echo
+
+    config = _service_config(args)
+    o = config.orthanc
+    ok = echo(o.host, o.port, o.ae_title, config.listener.ae_title)
+    print(f"C-ECHO {o.ae_title}@{o.host}:{o.port} : {'OK' if ok else 'ÉCHEC'}")
+    return 0 if ok else 1
+
+
+def cmd_download_models(args: argparse.Namespace) -> int:
+    from segbrainmri.models.flames import download_models
+
+    print(download_models(args.dest))
     return 0
 
 
@@ -152,7 +224,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_seg = sub.add_parser("segment", help="segmenter les lésions de SEP")
     add_io(p_seg)
-    p_seg.add_argument("--model", default="unet3d", help="architecture (défaut unet3d)")
+    p_seg.add_argument(
+        "--model",
+        default="flames",
+        help="flames (défaut, pré-entraîné) ou unet3d (nécessite --weights)",
+    )
+    p_seg.add_argument(
+        "--models-dir",
+        type=Path,
+        default=Path("/opt/segbrainmri/models"),
+        help="dossier des modèles téléchargés (flames)",
+    )
+    p_seg.add_argument(
+        "--no-skull-strip", action="store_true", help="FLAIR déjà sans crâne (flames)"
+    )
     p_seg.add_argument("--weights", type=Path, default=None, help="fichier de poids .pt/.pth")
     p_seg.add_argument(
         "--untrained",
@@ -170,6 +255,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_seg.add_argument("--threads", type=int, default=None, help="threads CPU PyTorch")
     p_seg.add_argument("--prefix", default="lesions", help="préfixe des fichiers de sortie")
     p_seg.set_defaults(func=cmd_segment)
+
+    def add_config(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "-c",
+            "--config",
+            type=Path,
+            default=None,
+            help="fichier TOML (défaut /etc/segbrainmri/config.toml)",
+        )
+
+    p_serve = sub.add_parser("serve", help="service DICOM (systemd)")
+    add_config(p_serve)
+    p_serve.set_defaults(func=cmd_serve)
+
+    p_dcm = sub.add_parser("process-dicom", help="traiter un dossier DICOM (une série)")
+    add_config(p_dcm)
+    p_dcm.add_argument("-i", "--input", type=Path, required=True, help="dossier de la série")
+    p_dcm.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="écrire aussi les DICOM résultats dans ce dossier",
+    )
+    p_dcm.add_argument("--send", action="store_true", help="envoyer les résultats à Orthanc")
+    p_dcm.set_defaults(func=cmd_process_dicom)
+
+    p_echo = sub.add_parser("echo", help="tester la connexion DICOM avec Orthanc")
+    add_config(p_echo)
+    p_echo.set_defaults(func=cmd_echo)
+
+    p_dl = sub.add_parser("download-models", help="télécharger FLAMeS et SynthStrip")
+    p_dl.add_argument("--dest", type=Path, default=Path("/opt/segbrainmri/models"))
+    p_dl.set_defaults(func=cmd_download_models)
     return parser
 
 

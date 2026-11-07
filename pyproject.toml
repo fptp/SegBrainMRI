@@ -7,7 +7,7 @@ name = "segbrainmri"
 version = "0.1.0"
 description = "Segmentation des lésions de Sclérose en Plaques (SEP) sur IRM cérébrale (FLAIR/T1), CPU par défaut, CUDA si disponible."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = ["MRI", "multiple sclerosis", "segmentation", "PyTorch", "NIfTI"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -21,6 +21,13 @@ dependencies = [
     "nibabel>=5.0",
     # torch est installé séparément (roue CPU ou CUDA) : voir README.md
     "torch>=2.1",
+    # Modèle FLAMeS (nnU-Net v2) et SynthStrip (surfa)
+    "nnunetv2>=2.5",
+    "surfa>=0.6",
+    # DICOM
+    "pydicom>=3.0",
+    "pynetdicom>=2.1",
+    "highdicom>=0.23",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +46,7 @@ addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
