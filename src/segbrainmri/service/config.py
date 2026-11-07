@@ -51,9 +51,27 @@ class ModelConfig:
 
 @dataclass
 class OutputConfig:
+    #: DICOM SEG (OHIF, Stone Web Viewer, 3D Slicer, Weasis)
     seg: bool = True
-    overlay: bool = True
+    #: FLAIR en niveaux de gris + contours des lésions (fenêtrable, toute visionneuse)
+    contours: bool = True
+    contour_thickness_mm: float = 0.8
+    #: Overlay couleur RGB (non fenêtrable)
+    overlay: bool = False
     overlay_opacity: float = 0.5
+
+
+@dataclass
+class LongitudinalConfig:
+    #: Chercher dans Orthanc la FLAIR antérieure du patient et signaler les nouvelles lésions
+    enabled: bool = True
+    #: Volume minimal (mm³) pour signaler une nouvelle lésion (~ sphère de 2,7 mm)
+    min_new_mm3: float = 10.0
+    #: Tolérance de recalage : une lésion à moins de N mm d'une ancienne n'est pas nouvelle
+    tolerance_mm: float = 1.0
+    #: Lésion élargie si volume >= ratio x ancien volume et augmentation >= N mm³
+    enlarge_ratio: float = 1.5
+    enlarge_min_mm3: float = 20.0
 
 
 @dataclass
@@ -63,6 +81,7 @@ class ServiceConfig:
     processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    longitudinal: LongitudinalConfig = field(default_factory=LongitudinalConfig)
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> ServiceConfig:

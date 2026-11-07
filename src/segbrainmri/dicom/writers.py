@@ -2,12 +2,18 @@
 
 * **DICOM SEG** (standard) : masque binaire des lésions référencé sur la FLAIR source,
   affichable en surimpression dans OHIF, Stone Web Viewer, 3D Slicer, Weasis...
-* **Overlay couleur** (Secondary Capture RGB) : FLAIR avec lésions en rouge, lisible par
-  n'importe quelle visionneuse, y compris l'explorateur de base d'Orthanc.
+* **Série contours** (MR dérivée, niveaux de gris) : la FLAIR d'origine, pixels inchangés,
+  avec le contour des lésions tracé à la valeur maximale. Elle se fenêtre comme la série
+  native dans toutes les visionneuses, et les contours restent blancs.
+* **Overlay couleur** (Secondary Capture RGB, optionnel) : lésions en rouge, mais une image
+  couleur ne peut pas être fenêtrée.
+
+Toutes les chaînes écrites sont en ASCII (pas de jeu de caractères à déclarer).
 """
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 
 import highdicom as hd
@@ -65,44 +71,144 @@ def _series_number(source: Dataset, offset: int) -> int:
     return int(source.get("SeriesNumber", 0) or 0) + offset
 
 
-def build_seg(mask: np.ndarray, sources: list[Dataset], info: ResultInfo) -> Dataset:
-    """DICOM SEG binaire. ``mask`` : ``(coupes, lignes, colonnes)`` aligné sur ``sources``."""
-    if mask.shape != (len(sources), sources[0].Rows, sources[0].Columns):
-        raise ValueError(f"Masque {mask.shape} incompatible avec la série source.")
-    description = hd.seg.SegmentDescription(
-        segment_number=1,
-        segment_label="Lesions SEP",
-        segmented_property_category=codes.SCT.MorphologicallyAbnormalStructure,
-        segmented_property_type=codes.SCT.Lesion,
-        algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,
-        algorithm_identification=hd.AlgorithmIdentificationSequence(
-            name=info.algorithm,
-            version=info.algorithm_version[:64],
-            family=codes.cid7162.ArtificialIntelligence,
-        ),
-        anatomic_regions=[codes.SCT.Brain],
-        display_color=hd.color.CIELabColor(53.0, 80.0, 67.0),  # rouge
+#: Couleurs CIELab des segments (rouge, orange, jaune).
+RED, ORANGE, YELLOW = (53.0, 80.0, 67.0), (67.0, 43.0, 74.0), (97.0, -22.0, 94.0)
+
+
+def _check_shape(array: np.ndarray, sources: list[Dataset]) -> None:
+    if array.shape != (len(sources), sources[0].Rows, sources[0].Columns):
+        raise ValueError(f"Masque {array.shape} incompatible avec la série source.")
+
+
+def build_labelmap_seg(
+    labelmap: np.ndarray,
+    sources: list[Dataset],
+    info: ResultInfo,
+    segments: list[tuple[str, tuple[float, float, float]]],
+    *,
+    series_description: str,
+    series_offset: int = 9000,
+) -> Dataset:
+    """DICOM SEG à plusieurs segments. ``labelmap`` : 0 = fond, ``k`` = ``segments[k-1]``."""
+    _check_shape(labelmap, sources)
+    algorithm = hd.AlgorithmIdentificationSequence(
+        name=info.algorithm,
+        version=info.algorithm_version[:64],
+        family=codes.cid7162.ArtificialIntelligence,
     )
-    binary = mask.astype(bool)
-    seg = hd.seg.Segmentation(
+    descriptions = [
+        hd.seg.SegmentDescription(
+            segment_number=k,
+            segment_label=label[:64],
+            segmented_property_category=codes.SCT.MorphologicallyAbnormalStructure,
+            segmented_property_type=codes.SCT.Lesion,
+            algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,
+            algorithm_identification=algorithm,
+            anatomic_regions=[codes.SCT.Brain],
+            display_color=hd.color.CIELabColor(*color),
+        )
+        for k, (label, color) in enumerate(segments, start=1)
+    ]
+    # Une couche binaire par segment (accepte les segments vides)
+    stacked = np.stack([labelmap == k for k in range(1, len(segments) + 1)], axis=-1)
+    return hd.seg.Segmentation(
         source_images=sources,
-        pixel_array=binary,
+        pixel_array=stacked,
         segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
-        segment_descriptions=[description],
+        segment_descriptions=descriptions,
         series_instance_uid=hd.UID(),
-        series_number=_series_number(sources[0], 9000),
+        series_number=_series_number(sources[0], series_offset),
         sop_instance_uid=hd.UID(),
         instance_number=1,
         manufacturer=OUR_MANUFACTURER,
         manufacturer_model_name=info.algorithm,
         software_versions=f"segbrainmri {__version__}",
         device_serial_number="0",
-        series_description=f"SEP lesions {info.algorithm} - {info.summary}"[:64],
+        series_description=series_description[:64],
         content_description=f"MS lesions: {info.summary}"[:64],
         content_label="LESIONS",
-        omit_empty_frames=bool(binary.any()),
+        omit_empty_frames=bool(labelmap.any()),
     )
-    return seg
+
+
+def build_seg(mask: np.ndarray, sources: list[Dataset], info: ResultInfo) -> Dataset:
+    """DICOM SEG binaire. ``mask`` : ``(coupes, lignes, colonnes)`` aligné sur ``sources``."""
+    return build_labelmap_seg(
+        (mask > 0).astype(np.uint8),
+        sources,
+        info,
+        [("Lesions SEP", RED)],
+        series_description=f"SEP lesions {info.algorithm} - {info.summary}",
+    )
+
+
+def _contour(mask: np.ndarray, thickness: int) -> np.ndarray:
+    """Contour extérieur 2D (coupe par coupe) : ne masque aucun pixel de la lésion."""
+    from scipy.ndimage import binary_dilation
+
+    structure = np.zeros((3, 3, 3), bool)
+    structure[1] = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]  # dilatation dans le plan uniquement
+    lesion = mask.astype(bool)
+    return binary_dilation(lesion, structure, iterations=thickness) & ~lesion
+
+
+def build_contour_series(
+    mask: np.ndarray,
+    sources: list[Dataset],
+    info: ResultInfo,
+    *,
+    series_description: str,
+    series_offset: int = 9001,
+    thickness_mm: float = 0.8,
+) -> list[Dataset]:
+    """Série MR dérivée : FLAIR d'origine (pixels inchangés) + contours des lésions.
+
+    Les contours prennent la valeur maximale représentable : ils restent blancs quel que
+    soit le fenêtrage, tandis que le reste de l'image se fenêtre comme la série native.
+    """
+    _check_shape(mask, sources)
+    spacing = min(float(v) for v in sources[0].get("PixelSpacing", [1.0, 1.0]))
+    contour = _contour(mask, max(1, round(thickness_mm / spacing)))
+    series_uid = generate_uid()
+    series_number = _series_number(sources[0], series_offset)
+    out = []
+    for k, src in enumerate(sources):
+        ds = copy.deepcopy(src)
+        pixels = src.pixel_array.copy()
+        bits = int(src.get("BitsStored", src.BitsAllocated))
+        signed = int(src.get("PixelRepresentation", 0)) == 1
+        top = 2 ** (bits - 1) - 1 if signed else 2**bits - 1
+        pixels[contour[k]] = top
+        ds.PixelData = pixels.astype(pixels.dtype).tobytes()
+        for tag in (
+            "LargestImagePixelValue",
+            "SmallestImagePixelValue",
+            "LargestPixelValueInSeries",
+            "SmallestPixelValueInSeries",
+        ):
+            if tag in ds:
+                del ds[tag]
+        ds.SOPInstanceUID = generate_uid()
+        ds.SeriesInstanceUID = series_uid
+        ds.SeriesNumber = series_number
+        ds.SeriesDescription = series_description[:64]
+        ds.ImageType = ["DERIVED", "SECONDARY"]
+        ds.Manufacturer = OUR_MANUFACTURER
+        ds.ManufacturerModelName = info.algorithm[:64]
+        ds.SoftwareVersions = f"segbrainmri {__version__}"
+        ds.DerivationDescription = f"Automatic MS lesion contours ({info.algorithm})"[:1024]
+        ds.ImageComments = f"Automatic MS lesion segmentation ({info.algorithm}): {info.summary}"
+        ref = Dataset()
+        ref.ReferencedSOPClassUID = src.SOPClassUID
+        ref.ReferencedSOPInstanceUID = src.SOPInstanceUID
+        ds.SourceImageSequence = [ref]
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = ds.SOPClassUID
+        meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian  # pixels décompressés
+        ds.file_meta = meta
+        out.append(ds)
+    return out
 
 
 def _window(volume: np.ndarray, source: Dataset) -> tuple[float, float]:
@@ -141,7 +247,7 @@ def build_overlay(
     rgb = rgb.round().astype(np.uint8)
 
     series_uid = generate_uid()
-    series_number = _series_number(sources[0], 9001)
+    series_number = _series_number(sources[0], 9002)
     description = f"SEP overlay {info.algorithm} - {info.summary}"[:64]
     out = []
     for k, src in enumerate(sources):
