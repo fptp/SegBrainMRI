@@ -53,8 +53,10 @@ class ModelConfig:
 class OutputConfig:
     #: DICOM SEG (OHIF, Stone Web Viewer, 3D Slicer, Weasis)
     seg: bool = True
-    #: FLAIR en niveaux de gris + contours des lésions (fenêtrable, toute visionneuse)
-    contours: bool = True
+    #: Séries d'images dérivées : FLAIR + contours en niveaux de gris, et série couleur
+    #: « SEP EVOLUTION » (nouvelles en rouge, élargies en orange). Inutiles avec une
+    #: visionneuse qui affiche le DICOM SEG ; à activer pour Horos.
+    contours: bool = False
     contour_thickness_mm: float = 0.8
     #: Compte rendu DICOM SR (résumé, nouvelles lésions avec volume et position)
     sr: bool = True

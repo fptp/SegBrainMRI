@@ -221,6 +221,7 @@ def test_end_to_end_new_lesion_against_prior_in_orthanc(orthanc, tmp_path):
 
     config = ServiceConfig()
     config.orthanc.host, config.orthanc.port = "127.0.0.1", dicom_port
+    config.output.contours = True  # vérifie aussi les séries d'images dérivées
     results = process_series(tmp_path / "current", ThresholdBackend(), config)
 
     descriptions = sorted(ds.SeriesDescription for ds in results if ds.InstanceNumber == 1)
@@ -229,7 +230,11 @@ def test_end_to_end_new_lesion_against_prior_in_orthanc(orthanc, tmp_path):
 
     # Série évolution : contour rouge autour de la nouvelle lésion, rien autour des anciennes
     evolution = sorted(
-        (ds for ds in results if ds.SeriesDescription.startswith("SEP EVOLUTION")),
+        (
+            ds
+            for ds in results
+            if ds.SeriesDescription.startswith("SEP EVOLUTION") and ds.Modality != "SEG"
+        ),
         key=lambda ds: int(ds.InstanceNumber),
     )
     rgb = np.stack([ds.pixel_array for ds in evolution])
@@ -247,7 +252,20 @@ def test_end_to_end_new_lesion_against_prior_in_orthanc(orthanc, tmp_path):
     assert flat["Nouvelles lesions"] == 1 and flat["Lesions elargies"] == 0
     assert flat["Localisation"].startswith("image n. ")
 
-    seg = next(ds for ds in results if ds.Modality == "SEG")
+    segs = {ds.SeriesDescription: ds for ds in results if ds.Modality == "SEG"}
+    assert len(segs) == 2
+    all_seg = next(ds for d, ds in segs.items() if d.startswith("SEP lesions"))
+    seg = next(ds for d, ds in segs.items() if d.startswith("SEP EVOLUTION SEG"))
+    # Couleurs affichées par la visionneuse (CIELab DICOM) : rouge, puis orange
+    colors = [s.RecommendedDisplayCIELabValue for s in seg.SegmentSequence]
+    labels = [s.SegmentLabel for s in seg.SegmentSequence]
+    assert labels == ["Nouvelles lesions", "Lesions elargies"]
+    assert colors[0] == list(all_seg.SegmentSequence[0].RecommendedDisplayCIELabValue)
+    assert colors[0] != colors[1]
+    assert (
+        len(all_seg.SegmentSequence) == 1
+        and all_seg.SegmentSequence[0].SegmentLabel == "Lesions SEP"
+    )
     decoded = hd.seg.Segmentation.from_dataset(seg)
     series = load_series(tmp_path / "current")
     uids = [ds.SOPInstanceUID for ds in series.datasets]
@@ -281,6 +299,7 @@ def test_no_prior_in_orthanc(orthanc, tmp_path):
     )
     config = ServiceConfig()
     config.orthanc.host, config.orthanc.port = "127.0.0.1", dicom_port
+    config.output.contours = True  # vérifie aussi les séries d'images dérivées
     results = process_series(tmp_path / "current", ThresholdBackend(), config)
     assert any("pas d'anteriorite" in ds.SeriesDescription for ds in results if ds.Modality == "MR")
     assert sum(ds.Modality == "SEG" for ds in results) == 1

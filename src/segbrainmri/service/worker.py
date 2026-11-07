@@ -26,7 +26,6 @@ from segbrainmri.dicom.series import (
 from segbrainmri.dicom.writers import (
     ORANGE,
     RED,
-    YELLOW,
     ResultInfo,
     build_color_contour_series,
     build_contour_series,
@@ -38,6 +37,7 @@ from segbrainmri.inference.stats import lesion_statistics
 from segbrainmri.longitudinal import (
     ENLARGING,
     NEW,
+    STABLE,
     LesionComparison,
     classify_lesions,
     register_rigid,
@@ -137,17 +137,19 @@ def build_results(
         result, prior = comparison
         versus = f"vs {prior.study_date} - {result.new} nouv, {result.enlarging} elarg"
         if out.seg:
+            # SEG 1 : toutes les lésions en rouge ; SEG 2 : évolution (nouvelles en rouge,
+            # élargies en orange). La visionneuse les superpose en transparence sur la FLAIR,
+            # qui reste fenêtrable.
+            results.append(build_seg(mask, sources, info))
+            evolution = np.where(result.labelmap == STABLE, 0, result.labelmap).astype(np.uint8)
             results.append(
                 build_labelmap_seg(
-                    result.labelmap,
+                    evolution,
                     sources,
                     info,
-                    [
-                        ("Nouvelles lesions", RED),
-                        ("Lesions elargies", ORANGE),
-                        ("Autres lesions", YELLOW),
-                    ],
-                    series_description=f"SEP lesions {info.algorithm} {versus}",
+                    [("Nouvelles lesions", RED), ("Lesions elargies", ORANGE)],
+                    series_description=f"SEP EVOLUTION SEG {versus}",
+                    series_offset=9005,
                 )
             )
         if out.contours:

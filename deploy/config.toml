@@ -31,7 +31,8 @@ skull_strip = true
 
 [output]
 seg = true               # DICOM SEG (OHIF, Stone Web Viewer, 3D Slicer, Weasis)
-contours = true          # FLAIR en niveaux de gris + contours des lesions (fenetrable partout)
+contours = false         # series d'images (contours, couleur) : inutiles si le viewer affiche le SEG ;
+                         # mettre true pour une visionneuse sans DICOM SEG (ex. Horos)
 contour_thickness_mm = 0.8
 sr = true                # compte rendu DICOM SR (resume, nouvelles lesions avec position)
 overlay = false          # ancienne serie couleur (non fenetrable)
