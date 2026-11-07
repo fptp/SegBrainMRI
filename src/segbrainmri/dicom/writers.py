@@ -207,6 +207,7 @@ def build_contour_series(
         meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
         meta.TransferSyntaxUID = ExplicitVRLittleEndian  # pixels décompressés
         ds.file_meta = meta
+        ds.set_original_encoding(False, True)  # explicite, petit-boutiste (comme file_meta)
         out.append(ds)
     return out
 
@@ -239,16 +240,72 @@ def build_overlay(
     """
     if volume.shape != mask.shape or volume.shape[0] != len(sources):
         raise ValueError("volume, masque et série source doivent avoir la même forme.")
-    low, high = _window(volume, sources[0])
-    gray = np.clip((volume - low) / (high - low), 0, 1) * 255.0
-    rgb = np.repeat(gray[..., None], 3, axis=-1)
+    rgb = _gray_rgb(volume, sources[0])
     lesion = mask.astype(bool)
     rgb[lesion] = (1 - opacity) * rgb[lesion] + opacity * np.asarray(color, dtype=float)
     rgb = rgb.round().astype(np.uint8)
 
+    return _rgb_series(
+        rgb,
+        sources,
+        info,
+        series_description=f"SEP overlay {info.algorithm} - {info.summary}",
+        series_offset=9002,
+    )
+
+
+def _gray_rgb(volume: np.ndarray, source: Dataset) -> np.ndarray:
+    low, high = _window(volume, source)
+    gray = np.clip((volume - low) / (high - low), 0, 1) * 255.0
+    return np.repeat(gray[..., None], 3, axis=-1)
+
+
+def build_color_contour_series(
+    volume: np.ndarray,
+    labelmap: np.ndarray,
+    colors: dict[int, tuple[int, int, int]],
+    sources: list[Dataset],
+    info: ResultInfo,
+    *,
+    series_description: str,
+    series_offset: int = 9003,
+    thickness_mm: float = 0.8,
+) -> list[Dataset]:
+    """Série couleur : FLAIR en niveaux de gris + contour coloré de chaque catégorie.
+
+    ``colors`` : ``{valeur de labelmap: (R, G, B)}`` ; les catégories absentes de
+    ``colors`` ne sont pas dessinées. L'image est figée (non fenêtrable) : le fenêtrage
+    par défaut de la série source est appliqué.
+    """
+    if volume.shape != labelmap.shape or volume.shape[0] != len(sources):
+        raise ValueError("volume, masque et série source doivent avoir la même forme.")
+    spacing = min(float(v) for v in sources[0].get("PixelSpacing", [1.0, 1.0]))
+    thickness = max(1, round(thickness_mm / spacing))
+    rgb = _gray_rgb(volume, sources[0])
+    # Ordre inverse : la première catégorie de ``colors`` est dessinée par-dessus
+    for value, color in reversed(list(colors.items())):
+        rgb[_contour(labelmap == value, thickness)] = color
+    return _rgb_series(
+        rgb.round().astype(np.uint8),
+        sources,
+        info,
+        series_description=series_description,
+        series_offset=series_offset,
+    )
+
+
+def _rgb_series(
+    rgb: np.ndarray,
+    sources: list[Dataset],
+    info: ResultInfo,
+    *,
+    series_description: str,
+    series_offset: int,
+) -> list[Dataset]:
+    """Série Secondary Capture RGB (une image par coupe, géométrie de la source)."""
     series_uid = generate_uid()
-    series_number = _series_number(sources[0], 9002)
-    description = f"SEP overlay {info.algorithm} - {info.summary}"[:64]
+    series_number = _series_number(sources[0], series_offset)
+    description = series_description[:64]
     out = []
     for k, src in enumerate(sources):
         ds = Dataset()

@@ -33,9 +33,19 @@ l'examen actuel (recalage rigide, sur le cerveau extrait) et classe chaque lési
 | **Autre** | stable, ou trop petite pour être signalée |
 
 Séries supplémentaires renvoyées :
-- **« SEP NOUVELLES vs AAAAMMJJ - N nouv, M elarg »** : la FLAIR avec le contour des
-  **seules nouvelles lésions** ;
+- **« SEP EVOLUTION vs AAAAMMJJ - N nouv (rouge), M elarg (orange) »** : la FLAIR avec le
+  contour **rouge** des nouvelles lésions et **orange** des lésions élargies (les autres ne
+  sont pas dessinées). Série couleur : elle s'affiche avec le fenêtrage par défaut de la
+  série d'origine et ne peut pas être refenêtrée ;
 - le DICOM SEG contient trois segments : nouvelles (rouge), élargies (orange), autres (jaune).
+
+### Compte rendu DICOM SR
+
+Chaque analyse renvoie aussi une série **« SEP compte rendu … »** (DICOM SR) contenant :
+un résumé en une phrase, le nombre de lésions et le volume lésionnel total, puis en cas
+de comparaison la date de l'antériorité, les nombres de lésions nouvelles / élargies /
+stables et, **pour chaque lésion nouvelle ou élargie, son volume et sa position** (numéro
+d'image et coordonnées en mm), pour la retrouver rapidement.
 
 Sans antériorité dans Orthanc, la description indique « pas d'anteriorite ». Le traitement
 dure environ deux fois plus longtemps (deux examens segmentés).
