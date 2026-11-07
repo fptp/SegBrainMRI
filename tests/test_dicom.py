@@ -167,3 +167,42 @@ def test_process_series_no_send(series_dir):
     results = process_series(series_dir, ThresholdBackend(), ServiceConfig(), send=False)
     assert results[0].Modality == "SEG"
     assert len(results) == 1 + len(list(series_dir.glob("*.dcm")))
+
+
+def test_missing_slice_is_rejected(series_dir):
+    middle = next(
+        p for p in series_dir.glob("*.dcm") if float(read_header(p).ImagePositionPatient[2]) == 20.0
+    )
+    middle.unlink()
+    with pytest.raises(ValueError, match="manquante"):
+        load_series(series_dir)
+
+
+def test_duplicate_instances_received_concurrently(tmp_path, series_dir):
+    """Même image reçue deux fois en même temps (plusieurs associations) : pas d'erreur."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    port = _free_port()
+    receiver = StorageReceiver(tmp_path / "in", port=port, host="127.0.0.1")
+    receiver.start()
+    try:
+        sources = [pydicom.dcmread(p) for p in sorted(series_dir.glob("*.dcm"))]
+
+        def push(_):
+            send_datasets(
+                sources,
+                host="127.0.0.1",
+                port=port,
+                called_aet="SEGBRAINMRI",
+                calling_aet="HOROS",
+                retries=1,
+            )
+
+        with ThreadPoolExecutor(4) as pool:
+            list(pool.map(push, range(4)))  # lève une exception si un C-STORE échoue
+    finally:
+        receiver.stop()
+    stored = list((tmp_path / "in").rglob("*"))
+    assert len([p for p in stored if p.suffix == ".dcm"]) == len(sources)
+    assert not [p for p in stored if p.suffix == ".part"]
+    assert load_series(next((tmp_path / "in").iterdir())).image.GetSize()[2] == len(sources)

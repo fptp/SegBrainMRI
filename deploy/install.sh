@@ -23,8 +23,13 @@ install -d -m 0755 "$PREFIX" /etc/segbrainmri
 echo "==> Environnement Python ($PREFIX/venv)"
 [[ -d "$PREFIX/venv" ]] || python3 -m venv "$PREFIX/venv"
 "$PREFIX/venv/bin/pip" install -q --upgrade pip
-"$PREFIX/venv/bin/pip" install -q torch --index-url "$TORCH_INDEX"
+# torch et torchvision doivent venir du même index (sinon : "torchvision::nms does not exist").
+# On retire d'abord un éventuel torchvision installé depuis PyPI par une version précédente.
+"$PREFIX/venv/bin/pip" uninstall -q -y torchvision 2>/dev/null || true
+"$PREFIX/venv/bin/pip" install -q torch torchvision --index-url "$TORCH_INDEX"
 "$PREFIX/venv/bin/pip" install -q "$REPO_DIR"
+# Réinstalle toujours le code du dépôt (mise à jour), sans toucher aux dépendances
+"$PREFIX/venv/bin/pip" install -q --force-reinstall --no-deps "$REPO_DIR"
 
 echo "==> Modèles (FLAMeS + SynthStrip, ~1 Go)"
 "$PREFIX/venv/bin/segbrainmri" download-models --dest "$PREFIX/models"
@@ -35,7 +40,8 @@ echo "==> Configuration"
 echo "==> Service systemd"
 install -m 0644 "$REPO_DIR/deploy/segbrainmri.service" /etc/systemd/system/segbrainmri.service
 systemctl daemon-reload
-systemctl enable --now segbrainmri
+systemctl enable segbrainmri
+systemctl restart segbrainmri
 
 echo "==> Test de connexion avec Orthanc"
 "$PREFIX/venv/bin/segbrainmri" echo --config /etc/segbrainmri/config.toml || \
