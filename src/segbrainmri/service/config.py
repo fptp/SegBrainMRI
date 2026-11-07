@@ -56,7 +56,9 @@ class OutputConfig:
     #: FLAIR en niveaux de gris + contours des lésions (fenêtrable, toute visionneuse)
     contours: bool = True
     contour_thickness_mm: float = 0.8
-    #: Overlay couleur RGB (non fenêtrable)
+    #: Compte rendu DICOM SR (résumé, nouvelles lésions avec volume et position)
+    sr: bool = True
+    #: Overlay couleur RGB de toutes les lésions (non fenêtrable)
     overlay: bool = False
     overlay_opacity: float = 0.5
 

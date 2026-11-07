@@ -6,6 +6,7 @@ from segbrainmri.longitudinal.compare import (
     SMALL,
     STABLE,
     LesionComparison,
+    LesionRecord,
     classify_lesions,
     register_rigid,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "SMALL",
     "STABLE",
     "LesionComparison",
+    "LesionRecord",
     "classify_lesions",
     "register_rigid",
 ]

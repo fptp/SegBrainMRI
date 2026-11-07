@@ -12,7 +12,7 @@ import SimpleITK as sitk
 from scipy import ndimage
 
 from segbrainmri.dicom.series import load_series
-from segbrainmri.dicom.writers import ResultInfo, build_contour_series
+from segbrainmri.dicom.writers import ResultInfo, build_color_contour_series, build_contour_series
 from segbrainmri.longitudinal import ENLARGING, NEW, SMALL, STABLE, classify_lesions, register_rigid
 from segbrainmri.service.config import ServiceConfig
 from segbrainmri.service.worker import process_series
@@ -103,6 +103,44 @@ def test_contour_series_is_windowable_grayscale(tmp_path):
     assert not (changed & lesions[k].astype(bool)).any()  # la lésion elle-même est intacte
 
 
+def _flatten_sr(sequence, out=None) -> dict:
+    """{nom du concept: valeur} pour tout l'arbre SR (texte ou nombre)."""
+    out = {} if out is None else out
+    for item in sequence:
+        name = item.ConceptNameCodeSequence[0].CodeMeaning
+        if item.ValueType == "TEXT":
+            out.setdefault(name, item.TextValue)
+        elif item.ValueType == "NUM":
+            out.setdefault(name, float(item.MeasuredValueSequence[0].NumericValue))
+        if "ContentSequence" in item:
+            _flatten_sr(item.ContentSequence, out)
+    return out
+
+
+def test_evolution_series_colors(tmp_path):
+    volume, _ = phantom_volume()
+    write_mr_series(tmp_path / "s", volume)
+    series = load_series(tmp_path / "s")
+    labelmap = np.zeros(volume.shape, np.uint8)
+    labelmap[8:12, 10:16, 8:14] = NEW
+    labelmap[8:12, 30:36, 25:31] = ENLARGING
+    labelmap[8:12, 20:24, 30:34] = STABLE
+    out = build_color_contour_series(
+        sitk.GetArrayFromImage(series.image).astype(np.float32),
+        labelmap,
+        {NEW: (255, 0, 0), ENLARGING: (255, 140, 0)},
+        series.datasets,
+        ResultInfo("T", "t", 3, 1.0),
+        series_description="SEP EVOLUTION test",
+    )
+    rgb = out[10].pixel_array
+    assert out[10].PhotometricInterpretation == "RGB"
+    assert (rgb[9, 8:14] == (255, 0, 0)).all()  # contour au-dessus de la nouvelle : rouge
+    assert (rgb[29, 25:31] == (255, 140, 0)).all()  # contour de l'élargie : orange
+    stable_ring = rgb[19, 30:34]
+    assert (stable_ring[:, 0] == stable_ring[:, 1]).all()  # stable non dessinée (gris)
+
+
 # --------------------------------------------------------------------------- Orthanc
 def _free_port() -> int:
     with socket.socket() as s:
@@ -187,7 +225,27 @@ def test_end_to_end_new_lesion_against_prior_in_orthanc(orthanc, tmp_path):
 
     descriptions = sorted(ds.SeriesDescription for ds in results if ds.InstanceNumber == 1)
     assert any("vs 20250301 - 1 nouv, 0 elarg" in d for d in descriptions), descriptions
-    assert any(d.startswith("SEP NOUVELLES") for d in descriptions)
+    assert "SEP EVOLUTION vs 20250301 - 1 nouv (rouge), 0 elarg (orange)" in descriptions
+
+    # Série évolution : contour rouge autour de la nouvelle lésion, rien autour des anciennes
+    evolution = sorted(
+        (ds for ds in results if ds.SeriesDescription.startswith("SEP EVOLUTION")),
+        key=lambda ds: int(ds.InstanceNumber),
+    )
+    rgb = np.stack([ds.pixel_array for ds in evolution])
+    red = (rgb[..., 0] == 255) & (rgb[..., 1] == 0) & (rgb[..., 2] == 0)
+    new_zone = ndimage.binary_dilation(
+        brain_phantom([NEW_LESION], **MOVE, seed=1) > 1500, iterations=3
+    )
+    assert red.sum() > 0 and new_zone[red].all()  # tout le rouge est autour de la nouvelle lésion
+
+    # Compte rendu SR : résumé, nombre de nouvelles lésions et localisation de chacune
+    sr = next(ds for ds in results if ds.Modality == "SR")
+    flat = _flatten_sr(sr.ContentSequence)
+    assert "1 nouvelle(s) lesion(s)" in flat["Resume"]
+    assert "01/03/2025" in flat["Resume"]
+    assert flat["Nouvelles lesions"] == 1 and flat["Lesions elargies"] == 0
+    assert flat["Localisation"].startswith("image n. ")
 
     seg = next(ds for ds in results if ds.Modality == "SEG")
     decoded = hd.seg.Segmentation.from_dataset(seg)
@@ -207,7 +265,9 @@ def test_end_to_end_new_lesion_against_prior_in_orthanc(orthanc, tmp_path):
         _get(base, f"/series/{sid}")["MainDicomTags"].get("SeriesDescription", "")
         for sid in current_study["Series"]
     )
-    assert any("NOUVELLES" in n for n in names) and any(n.startswith("SEP lesions") for n in names)
+    assert any(n.startswith("SEP EVOLUTION") for n in names)
+    assert any(n.startswith("SEP lesions") for n in names)
+    assert any(n.startswith("SEP compte rendu") for n in names)  # le SR est dans Orthanc
 
 
 def test_no_prior_in_orthanc(orthanc, tmp_path):

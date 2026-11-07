@@ -101,12 +101,23 @@ def register_rigid(
 
 
 @dataclass
+class LesionRecord:
+    """Une lésion de l'examen actuel."""
+
+    category: int  # NEW, ENLARGING, STABLE ou SMALL
+    volume_mm3: float
+    prior_volume_mm3: float  # 0 si aucune lésion antérieure correspondante
+    centroid_zyx: tuple[float, float, float]  # indices de voxel (coupe, ligne, colonne)
+
+
+@dataclass
 class LesionComparison:
     """Résultat de la comparaison, dans l'espace de l'examen actuel."""
 
     labelmap: np.ndarray  # (coupes, lignes, colonnes) : 0, NEW, ENLARGING, STABLE (+ petites)
     counts: dict[int, int] = field(default_factory=dict)
     volumes_mm3: dict[int, float] = field(default_factory=dict)
+    lesions: list[LesionRecord] = field(default_factory=list)
 
     @property
     def new(self) -> int:
@@ -153,6 +164,7 @@ def classify_lesions(
     labelmap = np.zeros(current.shape, np.uint8)
     counts = {NEW: 0, ENLARGING: 0, STABLE: 0, SMALL: 0}
     volumes = {NEW: 0.0, ENLARGING: 0.0, STABLE: 0.0, SMALL: 0.0}
+    records: list[LesionRecord] = []
     for index, box in enumerate(ndimage.find_objects(current_labels), start=1):
         if box is None:
             continue
@@ -166,16 +178,19 @@ def classify_lesions(
         near = ndimage.binary_dilation(lesion, margin) if margin is not None else lesion
         touched = np.unique(prior_labels[box][near & prior_bin[box]])
         touched = touched[touched > 0]
+        before = float(prior_volumes[touched].sum()) if touched.size else 0.0
         if touched.size == 0:
             category = NEW if volume >= min_new_mm3 else SMALL
         else:
-            before = float(prior_volumes[touched].sum())
             grown = volume >= enlarge_ratio * before and volume - before >= enlarge_min_mm3
             category = ENLARGING if grown else STABLE
         # Les petites lésions sans antécédent sont affichées avec les « autres » (STABLE)
         labelmap[box][lesion] = STABLE if category == SMALL else category
         counts[category] += 1
         volumes[category] += volume
+        local = ndimage.center_of_mass(lesion)
+        centroid = tuple(float(c + b.start) for c, b in zip(local, box, strict=True))
+        records.append(LesionRecord(category, volume, before, centroid))
     logger.info(
         "Comparaison : %d nouvelle(s), %d élargie(s), %d stable(s), %d petite(s) sous le seuil"
         " sur %d lésion(s)",
@@ -185,4 +200,4 @@ def classify_lesions(
         counts[SMALL],
         n_current,
     )
-    return LesionComparison(labelmap=labelmap, counts=counts, volumes_mm3=volumes)
+    return LesionComparison(labelmap=labelmap, counts=counts, volumes_mm3=volumes, lesions=records)

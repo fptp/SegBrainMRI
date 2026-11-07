@@ -140,8 +140,8 @@ def test_receive_process_and_send(tmp_path, series_dir):
 
     received = [read_header(p) for p in (tmp_path / "pacs").rglob("*.dcm")]
     modalities = sorted({ds.Modality for ds in received})
-    assert modalities == ["MR", "SEG"]
-    assert len(received) == 1 + len(sources)
+    assert modalities == ["MR", "SEG", "SR"]
+    assert len(received) == 2 + len(sources)  # SEG + SR + série contours
     assert all(ds.StudyInstanceUID == sources[0].StudyInstanceUID for ds in received)
     assert not any(worker.incoming.iterdir()) and not any(worker.failed.iterdir())
 
@@ -166,7 +166,7 @@ def test_worker_skips_non_flair_and_failures(tmp_path, monkeypatch):
 def test_process_series_no_send(series_dir):
     results = process_series(series_dir, ThresholdBackend(), ServiceConfig(), send=False)
     assert results[0].Modality == "SEG"
-    assert len(results) == 1 + len(list(series_dir.glob("*.dcm")))
+    assert len(results) == 2 + len(list(series_dir.glob("*.dcm")))  # SEG + SR + contours
 
 
 def test_missing_slice_is_rejected(series_dir):

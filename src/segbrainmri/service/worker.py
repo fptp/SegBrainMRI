@@ -15,6 +15,7 @@ import SimpleITK as sitk
 
 from segbrainmri.dicom.network import send_datasets
 from segbrainmri.dicom.query import Peer, PriorSeries, find_prior_flair, retrieve_series
+from segbrainmri.dicom.report import PriorInfo, build_report
 from segbrainmri.dicom.series import (
     DicomSeries,
     is_flair,
@@ -27,13 +28,20 @@ from segbrainmri.dicom.writers import (
     RED,
     YELLOW,
     ResultInfo,
+    build_color_contour_series,
     build_contour_series,
     build_labelmap_seg,
     build_overlay,
     build_seg,
 )
 from segbrainmri.inference.stats import lesion_statistics
-from segbrainmri.longitudinal import NEW, LesionComparison, classify_lesions, register_rigid
+from segbrainmri.longitudinal import (
+    ENLARGING,
+    NEW,
+    LesionComparison,
+    classify_lesions,
+    register_rigid,
+)
 from segbrainmri.models.backends import Analysis, LesionBackend, analyze
 from segbrainmri.service.config import ServiceConfig
 
@@ -150,14 +158,31 @@ def build_results(
                 series_description=f"SEP lesions {info.algorithm} - {info.summary}",
                 thickness_mm=out.contour_thickness_mm,
             )
-            results += build_contour_series(
-                (result.labelmap == NEW).astype(np.uint8),
+            # Série couleur de l'évolution : nouvelles en rouge, élargies en orange
+            results += build_color_contour_series(
+                sitk.GetArrayFromImage(series.image).astype(np.float32),
+                result.labelmap,
+                {NEW: (255, 0, 0), ENLARGING: (255, 140, 0)},
                 sources,
                 info,
-                series_description=f"SEP NOUVELLES {versus}",
-                series_offset=9003,
+                series_description=f"SEP EVOLUTION vs {prior.study_date} - {result.new} nouv "
+                f"(rouge), {result.enlarging} elarg (orange)",
                 thickness_mm=out.contour_thickness_mm,
             )
+    if out.sr:
+        results.append(
+            build_report(
+                sources,
+                series.image,
+                info,
+                comparison=comparison[0] if comparison else None,
+                prior=PriorInfo(comparison[1].study_date, comparison[1].description)
+                if comparison
+                else None,
+                longitudinal_searched=config.longitudinal.enabled,
+                min_new_mm3=config.longitudinal.min_new_mm3,
+            )
+        )
     if out.overlay:
         volume = sitk.GetArrayFromImage(series.image).astype(np.float32)
         results += build_overlay(volume, mask, sources, info, opacity=out.overlay_opacity)
