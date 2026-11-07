@@ -140,8 +140,8 @@ def test_receive_process_and_send(tmp_path, series_dir):
 
     received = [read_header(p) for p in (tmp_path / "pacs").rglob("*.dcm")]
     modalities = sorted({ds.Modality for ds in received})
-    assert modalities == ["MR", "SEG", "SR"]
-    assert len(received) == 2 + len(sources)  # SEG + SR + série contours
+    assert modalities == ["SEG", "SR"]  # par défaut : seulement le SEG et le compte rendu
+    assert len(received) == 2
     assert all(ds.StudyInstanceUID == sources[0].StudyInstanceUID for ds in received)
     assert not any(worker.incoming.iterdir()) and not any(worker.failed.iterdir())
 
@@ -166,6 +166,10 @@ def test_worker_skips_non_flair_and_failures(tmp_path, monkeypatch):
 def test_process_series_no_send(series_dir):
     results = process_series(series_dir, ThresholdBackend(), ServiceConfig(), send=False)
     assert results[0].Modality == "SEG"
+    assert [ds.Modality for ds in results] == ["SEG", "SR"]
+    config = ServiceConfig()
+    config.output.contours = True  # séries d'images dérivées, pour Horos
+    results = process_series(series_dir, ThresholdBackend(), config, send=False)
     assert len(results) == 2 + len(list(series_dir.glob("*.dcm")))  # SEG + SR + contours
 
 

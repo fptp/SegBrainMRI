@@ -30,7 +30,11 @@ par la visionneuse, à partir du **DICOM SEG** :
 - **SEG « SEP EVOLUTION SEG vs … »** (s'il y a une antériorité) : nouvelles lésions en
   rouge, élargies en orange.
 
-Visionneuses compatibles : **Weasis** (gratuit, Windows / macOS / Linux, version ≥ 4.3 :
+Le viewer CAI ([fptp/Viewer](https://github.com/fptp/Viewer), module `seg-overlay.js`)
+affiche ces SEG en surimpression. Les séries d'images dérivées (contours, couleur) ne sont
+donc plus envoyées par défaut : `[output] contours = true` les réactive.
+
+Autres visionneuses compatibles : **Weasis** (gratuit, Windows / macOS / Linux, version ≥ 4.3 :
 opacité réglable par lésion), **OHIF** (plugin Orthanc), **3D Slicer**. Horos n'affiche pas
 le DICOM SEG : il ne montre que les séries d'images (contours, série couleur).
 

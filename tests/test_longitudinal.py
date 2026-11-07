@@ -221,6 +221,7 @@ def test_end_to_end_new_lesion_against_prior_in_orthanc(orthanc, tmp_path):
 
     config = ServiceConfig()
     config.orthanc.host, config.orthanc.port = "127.0.0.1", dicom_port
+    config.output.contours = True  # vérifie aussi les séries d'images dérivées
     results = process_series(tmp_path / "current", ThresholdBackend(), config)
 
     descriptions = sorted(ds.SeriesDescription for ds in results if ds.InstanceNumber == 1)
@@ -298,6 +299,7 @@ def test_no_prior_in_orthanc(orthanc, tmp_path):
     )
     config = ServiceConfig()
     config.orthanc.host, config.orthanc.port = "127.0.0.1", dicom_port
+    config.output.contours = True  # vérifie aussi les séries d'images dérivées
     results = process_series(tmp_path / "current", ThresholdBackend(), config)
     assert any("pas d'anteriorite" in ds.SeriesDescription for ds in results if ds.Modality == "MR")
     assert sum(ds.Modality == "SEG" for ds in results) == 1
