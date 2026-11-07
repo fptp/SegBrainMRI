@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pydicom
 import SimpleITK as sitk
 from pydicom.dataset import Dataset
@@ -54,6 +55,31 @@ def is_flair(ds: Dataset, patterns: Iterable[str] = DEFAULT_FLAIR_PATTERNS) -> b
     return any(re.search(p, haystack, flags=re.IGNORECASE) for p in patterns)
 
 
+def check_slice_spacing(datasets: list[Dataset], tolerance: float = 0.2) -> None:
+    """Refuse une série incomplète (coupe manquante) ou à espacement irrégulier.
+
+    Une coupe manquante fausserait la géométrie du volume (et donc du résultat).
+    ``tolerance`` : écart relatif maximal entre deux espacements consécutifs.
+    """
+    orientation = np.asarray(datasets[0].ImageOrientationPatient, dtype=float)
+    normal = np.cross(orientation[:3], orientation[3:])
+    positions = np.array(
+        [np.dot(normal, np.asarray(ds.ImagePositionPatient, dtype=float)) for ds in datasets]
+    )
+    gaps = np.abs(np.diff(positions))
+    median = float(np.median(gaps))
+    if median <= 0 or np.any(gaps < 1e-3):
+        raise ValueError("Série invalide : plusieurs images à la même position (doublons ?).")
+    worst = float(np.max(np.abs(gaps - median)) / median)
+    if worst > tolerance:
+        missing = int(np.sum(np.round(gaps / median) - 1))
+        raise ValueError(
+            f"Série incomplète ou irrégulière : espacement entre coupes de {gaps.min():.2f} à "
+            f"{gaps.max():.2f} mm (~{max(missing, 0)} coupe(s) manquante(s)). "
+            "Renvoyer la série complète."
+        )
+
+
 def read_header(path: str | Path) -> Dataset:
     return pydicom.dcmread(path, stop_before_pixels=True)
 
@@ -81,6 +107,7 @@ def load_series(directory: str | Path) -> DicomSeries:
             "Les séries DICOM multi-trames (Enhanced MR) ne sont pas encore prises "
             "en charge : exporter la série en mono-trame (classic)."
         )
+    check_slice_spacing(datasets)
     reader = sitk.ImageSeriesReader()
     reader.SetFileNames(files)
     image = reader.Execute()

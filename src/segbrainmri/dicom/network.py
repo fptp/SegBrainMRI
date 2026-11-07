@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -22,7 +23,7 @@ _NOT_AUTHORIZED = 0x0124
 class StorageReceiver:
     """Serveur C-STORE : range chaque instance dans ``spool/<SeriesInstanceUID>/``.
 
-    Écriture atomique (fichier ``.part`` puis renommage) pour que le worker ne lise
+    Écriture atomique (fichier ``.part`` unique puis renommage) pour que le worker ne lise
     jamais un fichier incomplet.
     """
 
@@ -50,7 +51,9 @@ class StorageReceiver:
             series_dir = self.spool_dir / str(ds.SeriesInstanceUID)
             series_dir.mkdir(parents=True, exist_ok=True)
             target = series_dir / f"{ds.SOPInstanceUID}.dcm"
-            tmp = target.with_suffix(".part")
+            # Nom temporaire unique : une même image peut arriver deux fois en même
+            # temps (envoi en plusieurs associations simultanées, ex. Horos).
+            tmp = series_dir / f"{ds.SOPInstanceUID}.{uuid.uuid4().hex}.part"
             tmp.write_bytes(event.encoded_dataset())
             tmp.replace(target)
         except Exception:
