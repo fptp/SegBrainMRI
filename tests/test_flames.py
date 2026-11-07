@@ -73,3 +73,67 @@ def test_synthstrip_failure_is_reported(tmp_path):
         SynthStrip(script, weights, torch.device("cpu")).run(
             tmp_path / "a", tmp_path / "b", tmp_path / "c"
         )
+
+
+FAKE_SYNTHSTRIP = """
+import sys
+import numpy as np
+import surfa as sf
+
+a = sys.argv
+src, out, mask = a[a.index("-i") + 1], a[a.index("-o") + 1], a[a.index("-m") + 1]
+image = sf.load_volume(src)
+# Mêmes appels surfa que mri_synthstrip (c'est ici que le bug numpy 2 se produisait)
+conformed = image.conform(voxsize=1.0, dtype="float32", method="nearest", orientation="LIA")
+back = conformed.resample_like(image, fill=0)
+brain = image.new((back.data > 0.5).astype(np.uint8))
+stripped = image.copy()
+stripped[brain == 0] = 0
+stripped.save(out)
+brain.save(mask)
+"""
+
+
+def _oblique_sagittal(shape=(30, 48, 40)):
+    import numpy as np
+    import SimpleITK as sitk
+
+    z, y, x = np.meshgrid(*(np.linspace(-1, 1, s) for s in shape), indexing="ij")
+    arr = np.where(x**2 + y**2 + z**2 < 0.6, 1.0, 0.0).astype(np.float32)
+    image = sitk.GetImageFromArray(arr)
+    image.SetSpacing((0.5, 0.5, 0.9))
+    sag = np.array([[0, 0, 1], [1, 0, 0], [0, -1, 0]], float)  # GE CUBE sagittal
+    t = np.deg2rad(7)  # légère obliquité, comme une vraie acquisition
+    rot = np.array([[1, 0, 0], [0, np.cos(t), -np.sin(t)], [0, np.sin(t), np.cos(t)]])
+    image.SetDirection(tuple((rot @ sag).ravel()))
+    image.SetOrigin((-30.0, -100.0, 80.0))
+    return image
+
+
+def test_synthstrip_handles_sagittal_with_numpy2(tmp_path):
+    """FLAIR sagittale oblique : surfa plantait (numpy 2) sans la pré-orientation LIA."""
+    import numpy as np
+    import SimpleITK as sitk
+
+    script = tmp_path / "mri_synthstrip"
+    script.write_text(FAKE_SYNTHSTRIP)
+    weights = tmp_path / "w.pt"
+    weights.write_bytes(b"")
+    image = _oblique_sagittal()
+    stripper = SynthStrip(script, weights, torch.device("cpu"))
+
+    stripped, brain = stripper.strip(image, tmp_path)
+    for result in (stripped, brain):
+        assert result.GetSize() == image.GetSize()
+        assert result.GetDirection() == image.GetDirection()
+        assert result.GetOrigin() == image.GetOrigin()
+    inside = sitk.GetArrayFromImage(image) > 0
+    overlap = (sitk.GetArrayFromImage(brain) > 0) & inside
+    assert overlap.sum() > 0.9 * inside.sum()  # masque aligné sur l'anatomie, pas décalé
+    np.testing.assert_array_equal(sitk.GetArrayFromImage(stripped)[~inside], 0)
+
+    # Sans le correctif (image sagittale passée telle quelle), surfa échoue
+    raw = tmp_path / "raw.nii.gz"
+    sitk.WriteImage(image, str(raw))
+    with pytest.raises(RuntimeError, match="sequence"):
+        stripper.run(raw, tmp_path / "o.nii.gz", tmp_path / "m.nii.gz")
