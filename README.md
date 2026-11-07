@@ -20,6 +20,20 @@ IRM ──► Orthanc ──(FLAIR, DICOM)──► VM SegBrainMRI ──(résul
 
    La description des séries indique le nombre de lésions et le volume lésionnel total.
 
+### Afficher les lésions en couleur transparente sur la FLAIR fenêtrable
+
+Une image DICOM est soit en niveaux de gris (fenêtrable), soit en couleur (figée) : un
+masque coloré **transparent** au-dessus d'une FLAIR **qui reste fenêtrable** est affiché
+par la visionneuse, à partir du **DICOM SEG** :
+
+- **SEG « SEP lesions … »** : toutes les lésions, en rouge ;
+- **SEG « SEP EVOLUTION SEG vs … »** (s'il y a une antériorité) : nouvelles lésions en
+  rouge, élargies en orange.
+
+Visionneuses compatibles : **Weasis** (gratuit, Windows / macOS / Linux, version ≥ 4.3 :
+opacité réglable par lésion), **OHIF** (plugin Orthanc), **3D Slicer**. Horos n'affiche pas
+le DICOM SEG : il ne montre que les séries d'images (contours, série couleur).
+
 ### Comparaison avec l'examen antérieur (nouvelles lésions)
 
 Si Orthanc contient une **FLAIR antérieure du même patient** (même identifiant patient,
