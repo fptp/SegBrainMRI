@@ -165,6 +165,35 @@ class SynthStrip:
                 f"SynthStrip a échoué :\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
             )
 
+    def strip(self, image: sitk.Image, workdir: Path) -> tuple[sitk.Image, sitk.Image]:
+        """Renvoie (image sans crâne, masque cérébral) sur la grille exacte de ``image``.
+
+        L'image est d'abord réorientée en LIA, l'orientation de travail de SynthStrip :
+        ``surfa`` (<= 0.6.3) plante avec numpy 2 dès qu'il doit lui-même permuter les axes
+        (ex. FLAIR sagittale : "setting an array element with a sequence"). La
+        réorientation (permutation / retournement d'axes) est exacte et inversée ensuite.
+        """
+        original = sitk.DICOMOrientImageFilter.GetOrientationFromDirectionCosines(
+            image.GetDirection()
+        )
+        src, out, mask = (
+            workdir / "ss_in.nii.gz",
+            workdir / "ss_out.nii.gz",
+            workdir / "ss_mask.nii.gz",
+        )
+        sitk.WriteImage(sitk.DICOMOrient(sitk.Cast(image, sitk.sitkFloat32), "LIA"), str(src))
+        self.run(src, out, mask)
+        results = []
+        for path, pixel in ((out, sitk.sitkFloat32), (mask, sitk.sitkUInt8)):
+            restored = sitk.DICOMOrient(sitk.ReadImage(str(path), pixel), original)
+            if restored.GetSize() != image.GetSize():
+                raise RuntimeError(
+                    f"SynthStrip : taille inattendue {restored.GetSize()} != {image.GetSize()}"
+                )
+            restored.CopyInformation(image)
+            results.append(restored)
+        return results[0], results[1]
+
 
 # --------------------------------------------------------------------------- FLAMeS
 class FlamesBackend:
@@ -244,15 +273,13 @@ class FlamesBackend:
         predictor = self._load_predictor()
         with tempfile.TemporaryDirectory(prefix="segbrainmri_") as tmp:
             tmp = Path(tmp)
-            src = tmp / "flair_0000.nii.gz"
-            sitk.WriteImage(sitk.Cast(flair, sitk.sitkFloat32), str(src))
-            brain_mask = None
+            image, brain_mask = sitk.Cast(flair, sitk.sitkFloat32), None
             if self.stripper is not None:
                 logger.info("Extraction du cerveau (SynthStrip)...")
-                stripped, mask_path = tmp / "flair_brain_0000.nii.gz", tmp / "brain_mask.nii.gz"
-                self.stripper.run(src, stripped, mask_path)
-                src = stripped
-                brain_mask = sitk.ReadImage(str(mask_path), sitk.sitkUInt8)
+                image, brain_mask = self.stripper.strip(image, tmp)
+            # Entrée nnU-Net dans l'orientation d'origine, comme l'inférence de référence
+            src = tmp / "flair_0000.nii.gz"
+            sitk.WriteImage(image, str(src))
 
             logger.info("Segmentation des lésions (nnU-Net)...")
             # Lecteur déclaré dans plans.json : garantit l'ordre des axes de l'entraînement
@@ -266,7 +293,6 @@ class FlamesBackend:
         mask = sitk.Cast(mask > 0, sitk.sitkUInt8)
         mask.CopyInformation(flair)
         if brain_mask is not None:
-            brain_mask.CopyInformation(flair)
             mask = sitk.And(mask, brain_mask > 0)
             mask = sitk.Cast(mask, sitk.sitkUInt8)
         logger.info("FLAMeS terminé en %.0f s", time.perf_counter() - start)
