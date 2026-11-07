@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+import tempfile
 import threading
 import time
 import traceback
@@ -13,10 +14,27 @@ import numpy as np
 import SimpleITK as sitk
 
 from segbrainmri.dicom.network import send_datasets
-from segbrainmri.dicom.series import is_flair, is_our_output, load_series, read_header
-from segbrainmri.dicom.writers import ResultInfo, build_overlay, build_seg
+from segbrainmri.dicom.query import Peer, PriorSeries, find_prior_flair, retrieve_series
+from segbrainmri.dicom.series import (
+    DicomSeries,
+    is_flair,
+    is_our_output,
+    load_series,
+    read_header,
+)
+from segbrainmri.dicom.writers import (
+    ORANGE,
+    RED,
+    YELLOW,
+    ResultInfo,
+    build_contour_series,
+    build_labelmap_seg,
+    build_overlay,
+    build_seg,
+)
 from segbrainmri.inference.stats import lesion_statistics
-from segbrainmri.models.backends import LesionBackend
+from segbrainmri.longitudinal import NEW, LesionComparison, classify_lesions, register_rigid
+from segbrainmri.models.backends import Analysis, LesionBackend, analyze
 from segbrainmri.service.config import ServiceConfig
 
 logger = logging.getLogger(__name__)
@@ -38,25 +56,133 @@ def build_backend(config: ServiceConfig) -> LesionBackend:
     )
 
 
+def _array(image: sitk.Image) -> np.ndarray:
+    return sitk.GetArrayFromImage(image).astype(np.uint8)  # (coupes, lignes, colonnes)
+
+
+def compare_with_prior(
+    series: DicomSeries, analysis: Analysis, backend: LesionBackend, config: ServiceConfig
+) -> tuple[LesionComparison, PriorSeries] | None:
+    """Récupère la FLAIR antérieure dans Orthanc, la segmente, la recale et compare."""
+    o = config.orthanc
+    peer = Peer(o.host, o.port, o.ae_title, config.listener.ae_title)
+    prior = find_prior_flair(series.first, peer, config.processing.flair_patterns)
+    if prior is None:
+        logger.info("Aucune FLAIR antérieure trouvée dans Orthanc pour ce patient.")
+        return None
+    logger.info(
+        "Antériorité : %s du %s (%d images)", prior.description, prior.study_date, prior.instances
+    )
+    with tempfile.TemporaryDirectory(prefix="segbrainmri_prior_") as tmp:
+        retrieve_series(prior, peer, tmp)
+        prior_series = load_series(tmp)
+    logger.info("Segmentation de l'antériorité...")
+    prior_analysis = analyze(backend, prior_series.image)
+    logger.info("Recalage de l'antériorité sur l'examen actuel...")
+    fixed = analysis.brain if analysis.brain is not None else series.image
+    moving = prior_analysis.brain if prior_analysis.brain is not None else prior_series.image
+    transform = register_rigid(fixed, moving)
+    prior_mask = sitk.Resample(
+        prior_analysis.mask,
+        series.image,
+        transform,
+        sitk.sitkNearestNeighbor,
+        0,
+        sitk.sitkUInt8,
+    )
+    lg = config.longitudinal
+    comparison = classify_lesions(
+        _array(analysis.mask),
+        _array(prior_mask),
+        tuple(reversed(series.image.GetSpacing())),
+        min_new_mm3=lg.min_new_mm3,
+        tolerance_mm=lg.tolerance_mm,
+        enlarge_ratio=lg.enlarge_ratio,
+        enlarge_min_mm3=lg.enlarge_min_mm3,
+    )
+    return comparison, prior
+
+
+def build_results(
+    series: DicomSeries,
+    mask: np.ndarray,
+    info: ResultInfo,
+    config: ServiceConfig,
+    comparison: tuple[LesionComparison, PriorSeries] | None,
+) -> list:
+    out = config.output
+    sources = series.datasets
+    results = []
+    if comparison is None:
+        suffix = " - pas d'anteriorite" if config.longitudinal.enabled else ""
+        if out.seg:
+            results.append(build_seg(mask, sources, info))
+        if out.contours:
+            results += build_contour_series(
+                mask,
+                sources,
+                info,
+                series_description=f"SEP lesions {info.algorithm} - {info.summary}{suffix}",
+                thickness_mm=out.contour_thickness_mm,
+            )
+    else:
+        result, prior = comparison
+        versus = f"vs {prior.study_date} - {result.new} nouv, {result.enlarging} elarg"
+        if out.seg:
+            results.append(
+                build_labelmap_seg(
+                    result.labelmap,
+                    sources,
+                    info,
+                    [
+                        ("Nouvelles lesions", RED),
+                        ("Lesions elargies", ORANGE),
+                        ("Autres lesions", YELLOW),
+                    ],
+                    series_description=f"SEP lesions {info.algorithm} {versus}",
+                )
+            )
+        if out.contours:
+            results += build_contour_series(
+                mask,
+                sources,
+                info,
+                series_description=f"SEP lesions {info.algorithm} - {info.summary}",
+                thickness_mm=out.contour_thickness_mm,
+            )
+            results += build_contour_series(
+                (result.labelmap == NEW).astype(np.uint8),
+                sources,
+                info,
+                series_description=f"SEP NOUVELLES {versus}",
+                series_offset=9003,
+                thickness_mm=out.contour_thickness_mm,
+            )
+    if out.overlay:
+        volume = sitk.GetArrayFromImage(series.image).astype(np.float32)
+        results += build_overlay(volume, mask, sources, info, opacity=out.overlay_opacity)
+    return results
+
+
 def process_series(
     series_dir: Path, backend: LesionBackend, config: ServiceConfig, *, send: bool = True
 ) -> list:
-    """Segmente une série et renvoie (et envoie) les datasets résultats."""
+    """Segmente une série (et la compare à l'antériorité), renvoie et envoie les résultats."""
     series = load_series(series_dir)
-    mask_img = backend.segment(series.image)
-    mask = sitk.GetArrayFromImage(mask_img).astype(np.uint8)  # (coupes, lignes, colonnes)
-    count, volume_ml = lesion_statistics(mask_img)
+    analysis = analyze(backend, series.image)
+    mask = _array(analysis.mask)
+    count, volume_ml = lesion_statistics(analysis.mask)
     info = ResultInfo(backend.name, backend.version, count, volume_ml)
     logger.info("Résultat : %s", info.summary)
 
-    results = []
-    if config.output.seg:
-        results.append(build_seg(mask, series.datasets, info))
-    if config.output.overlay:
-        volume = sitk.GetArrayFromImage(series.image).astype(np.float32)
-        results += build_overlay(
-            volume, mask, series.datasets, info, opacity=config.output.overlay_opacity
-        )
+    comparison = None
+    if config.longitudinal.enabled:
+        try:
+            comparison = compare_with_prior(series, analysis, backend, config)
+        except Exception:
+            logger.exception("Comparaison avec l'antériorité impossible : envoi sans comparaison.")
+
+    results = build_results(series, mask, info, config, comparison)
     if send:
         o = config.orthanc
         send_datasets(

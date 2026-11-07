@@ -12,12 +12,37 @@ IRM ──► Orthanc ──(FLAIR, DICOM)──► VM SegBrainMRI ──(résul
    à la VM SegBrainMRI.
 2. La VM segmente les lésions en arrière-plan avec **FLAMeS**, sans intervention.
 3. Les résultats rejoignent **le même examen** dans Orthanc (192.168.10.172, port 4242) :
-   - une série **DICOM SEG** (masque des lésions, affichable en surimpression dans OHIF,
-     Stone Web Viewer, 3D Slicer, Weasis…) ;
-   - une série **overlay** : la FLAIR avec les lésions en rouge, lisible dans n'importe
-     quelle visionneuse (y compris l'explorateur d'Orthanc).
+   - **« SEP lesions … »** : la FLAIR avec le **contour des lésions** en blanc. Les pixels
+     sont ceux de la série d'origine : elle **se fenêtre normalement** dans toutes les
+     visionneuses (Orthanc, Horos…) ;
+   - une série **DICOM SEG** (masque des lésions, affichable en couleur en surimpression
+     dans OHIF, Stone Web Viewer, 3D Slicer, Weasis…).
 
    La description des séries indique le nombre de lésions et le volume lésionnel total.
+
+### Comparaison avec l'examen antérieur (nouvelles lésions)
+
+Si Orthanc contient une **FLAIR antérieure du même patient** (même identifiant patient,
+date antérieure), la VM la récupère automatiquement, la segmente, la **recale** sur
+l'examen actuel (recalage rigide, sur le cerveau extrait) et classe chaque lésion :
+
+| Catégorie | Règle (réglable dans `[longitudinal]`) |
+|---|---|
+| **Nouvelle** | aucun recouvrement avec une lésion antérieure (à 1 mm près) et ≥ 10 mm³ |
+| **Élargie** | volume ≥ 1,5 × l'ancien et au moins +20 mm³ |
+| **Autre** | stable, ou trop petite pour être signalée |
+
+Séries supplémentaires renvoyées :
+- **« SEP NOUVELLES vs AAAAMMJJ - N nouv, M elarg »** : la FLAIR avec le contour des
+  **seules nouvelles lésions** ;
+- le DICOM SEG contient trois segments : nouvelles (rouge), élargies (orange), autres (jaune).
+
+Sans antériorité dans Orthanc, la description indique « pas d'anteriorite ». Le traitement
+dure environ deux fois plus longtemps (deux examens segmentés).
+
+> ⚠️ Des différences de machine, de protocole ou de segmentation entre les deux examens
+> peuvent produire de **fausses nouvelles lésions** : la relecture par le radiologue reste
+> indispensable.
 
 Fonctionne **sur CPU** (plusieurs minutes par examen) et bascule automatiquement sur le
 **GPU** dès qu'il est installé.
@@ -144,7 +169,8 @@ Ajouter `--send` à `process-dicom` pour envoyer aussi les résultats à Orthanc
 src/segbrainmri/
 ├── core/           # device.py (CPU/GPU), logging.py
 ├── models/         # flames.py (FLAMeS + SynthStrip), unet3d.py (référence), backends.py
-├── dicom/          # series.py (lecture, sélection FLAIR), writers.py (SEG, overlay), network.py
+├── dicom/          # series.py, writers.py (SEG, contours), network.py, query.py (antériorité)
+├── longitudinal/   # compare.py (recalage, nouvelles lésions)
 ├── service/        # config.py, worker.py, app.py (service `segbrainmri serve`)
 ├── preprocessing/  # pipeline générique NIfTI (pour le UNet3D de référence)
 ├── inference/      # fenêtre glissante, statistiques lésionnelles

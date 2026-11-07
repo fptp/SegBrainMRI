@@ -34,6 +34,7 @@ import SimpleITK as sitk
 import torch
 
 from segbrainmri.core.device import get_device
+from segbrainmri.models.backends import Analysis
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,10 @@ class FlamesBackend:
         return predictor
 
     def segment(self, flair: sitk.Image) -> sitk.Image:
+        return self.analyze(flair).mask
+
+    def analyze(self, flair: sitk.Image) -> Analysis:
+        """Masque des lésions et cerveau extrait (sans crâne), sur la grille de ``flair``."""
         start = time.perf_counter()
         predictor = self._load_predictor()
         with tempfile.TemporaryDirectory(prefix="segbrainmri_") as tmp:
@@ -300,4 +305,5 @@ class FlamesBackend:
             mask = sitk.And(mask, brain_mask > 0)
             mask = sitk.Cast(mask, sitk.sitkUInt8)
         logger.info("FLAMeS terminé en %.0f s", time.perf_counter() - start)
-        return mask
+        brain = image if brain_mask is not None else None
+        return Analysis(mask=mask, brain=brain)
