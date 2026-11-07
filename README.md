@@ -80,7 +80,7 @@ sudo systemctl restart segbrainmri
 
 1. Copier `deploy/orthanc/segbrainmri.lua` dans `/etc/orthanc/segbrainmri.lua`.
 2. Ajouter dans la configuration d'Orthanc (ex. `/etc/orthanc/orthanc.json`) le contenu de
-   `deploy/orthanc/orthanc-segbrainmri.json`, en remplaçant `ADRESSE_IP_DE_LA_VM_SEGBRAINMRI`.
+   `deploy/orthanc/orthanc-segbrainmri.json`, (adresse de la VM SegBrainMRI : 192.168.10.145, à adapter si elle change).
    Si `DicomModalities` ou `LuaScripts` existent déjà, ajouter les entrées au lieu de dupliquer les clés.
 3. Redémarrer Orthanc :
    ```bash

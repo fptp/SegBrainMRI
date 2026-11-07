@@ -2,7 +2,7 @@
   "DicomModalities": {
     "segbrainmri": {
       "AET": "SEGBRAINMRI",
-      "Host": "ADRESSE_IP_DE_LA_VM_SEGBRAINMRI",
+      "Host": "192.168.10.145",
       "Port": 11112
     }
   },
