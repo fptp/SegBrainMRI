@@ -142,8 +142,12 @@ class SynthStrip:
         self.script, self.weights, self.device, self.threads = script, weights, device, threads
 
     def run(self, image: Path, out_image: Path, out_mask: Path) -> None:
+        # Lancé via le module de compatibilité : corrige surfa (numpy 2 / scipy récents)
+        # en mémoire, puis exécute le script officiel sans le modifier.
         cmd = [
             sys.executable,
+            "-m",
+            "segbrainmri.models._surfa_compat",
             str(self.script),
             "-i",
             str(image),

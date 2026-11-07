@@ -85,6 +85,7 @@ src, out, mask = a[a.index("-i") + 1], a[a.index("-o") + 1], a[a.index("-m") + 1
 image = sf.load_volume(src)
 # Mêmes appels surfa que mri_synthstrip (c'est ici que le bug numpy 2 se produisait)
 conformed = image.conform(voxsize=1.0, dtype="float32", method="nearest", orientation="LIA")
+conformed = conformed.crop_to_bbox()  # 2e bug (scipy récent) : corrigé par _surfa_compat
 back = conformed.resample_like(image, fill=0)
 brain = image.new((back.data > 0.5).astype(np.uint8))
 stripped = image.copy()
@@ -137,3 +138,28 @@ def test_synthstrip_handles_sagittal_with_numpy2(tmp_path):
     sitk.WriteImage(image, str(raw))
     with pytest.raises(RuntimeError, match="sequence"):
         stripper.run(raw, tmp_path / "o.nii.gz", tmp_path / "m.nii.gz")
+
+
+def test_surfa_compat_fixes_crop_to_bbox(tmp_path):
+    """Sans le correctif, crop_to_bbox plante avec scipy récent ; avec, il fonctionne."""
+    import subprocess
+    import sys
+
+    code = (
+        "import numpy as np, surfa as sf\n"
+        "{patch}"
+        "v = sf.Volume(np.pad(np.ones((4, 5, 6), np.float32), 3))\n"
+        "print(v.crop_to_bbox().shape)\n"
+    )
+    patch = "from segbrainmri.models import _surfa_compat; _surfa_compat.apply()\n"
+    fixed = subprocess.run(
+        [sys.executable, "-c", code.format(patch=patch)], capture_output=True, text=True
+    )
+    assert fixed.returncode == 0, fixed.stderr
+    assert "(4, 5, 6)" in fixed.stdout
+    raw = subprocess.run(
+        [sys.executable, "-c", code.format(patch="")], capture_output=True, text=True
+    )
+    if raw.returncode == 0:
+        pytest.skip("surfa/scipy installés n'ont pas le bug (correctif inutile mais sans effet)")
+    assert "numpy.bool" in raw.stderr
