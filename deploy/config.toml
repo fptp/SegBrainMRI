@@ -46,3 +46,14 @@ min_new_mm3 = 10         # taille minimale d'une nouvelle lesion signalee
 tolerance_mm = 1.0       # marge de recalage : a moins de 1 mm d'une ancienne lesion = pas nouvelle
 enlarge_ratio = 1.5      # lesion elargie si volume >= 1,5 x l'ancien...
 enlarge_min_mm3 = 20     # ... et au moins 20 mm3 de plus
+
+[volumetry]
+# Volumetrie des T1 3D (FastSurfer) : lobes, hippocampes, ventricules... et percentiles
+# selon l'age et le sexe (normes BrainCharts, non calibrees sur le scanner local).
+enabled = true
+t1_patterns = ["bravo", "mprage", "mp-rage", "spgr", "t1[ _-]?3d", "3d[ _-]?t1", "t1w[ _-]?3d", "3d[ _-]?tfe", "t1[ _-]?tfe"]
+# T1 injectees ignorees (FastSurfer est entraine sur des T1 sans gadolinium)
+t1_exclude = ["gado", '\bgd\b', '\bpost\b', '\+ ?c\b', "contrast", '\binj']
+fastsurfer_dir = "/opt/segbrainmri/fastsurfer"
+fastsurfer_python = "/opt/segbrainmri/fastsurfer-venv/bin/python"
+norms_dir = "/opt/segbrainmri/models/norms"

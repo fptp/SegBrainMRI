@@ -2,7 +2,7 @@
 
 Sous-commandes :
     info             appareil détecté (CPU/GPU) et versions ;
-    download-models  télécharge FLAMeS et SynthStrip ;
+    download-models  télécharge FLAMeS, SynthStrip et les normes de volumétrie ;
     serve            service DICOM : reçoit les FLAIR, segmente, renvoie à Orthanc ;
     process-dicom    traite une fois un dossier DICOM (et envoie à Orthanc si --send) ;
     echo             teste la connexion DICOM avec Orthanc (C-ECHO) ;
@@ -181,8 +181,10 @@ def cmd_echo(args: argparse.Namespace) -> int:
 
 def cmd_download_models(args: argparse.Namespace) -> int:
     from segbrainmri.models.flames import download_models
+    from segbrainmri.volumetry.normative import download_norms
 
     print(download_models(args.dest))
+    print(download_norms(args.dest / "norms"))
     return 0
 
 

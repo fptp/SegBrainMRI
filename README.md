@@ -78,6 +78,35 @@ Fonctionne **sur CPU** (plusieurs minutes par examen) et bascule automatiquement
 > ⚠️ **Outil de recherche, non certifié dispositif médical.** Les résultats ne doivent pas
 > servir seuls à un diagnostic.
 
+## Volumétrie cérébrale (troubles cognitifs) : T1 3D
+
+Une **T1 3D non injectée** (BRAVO, MPRAGE, SPGR…) envoyée à la VM est analysée par
+**FastSurfer** v2.6.1 (Apache 2.0) : segmentation en structures (atlas aseg + 31 régions
+corticales DKT par hémisphère), volumes corrigés du volume partiel.
+
+Résultats renvoyés dans l'examen, dans Orthanc :
+- **SEG « VOLUMETRIE structures FastSurfer »** : lobes frontal, pariétal, temporal,
+  occipital, cingulaire, insula, hippocampes, amygdales, ventricules latéraux et cornes
+  temporales, chacun dans sa couleur ;
+- **SR « VOLUMETRIE compte rendu FastSurfer »** : pour chaque structure, volume gauche et
+  droit (mL), % du volume intracrânien, indice d'asymétrie et, pour les **hippocampes,
+  amygdales, cornes temporales, ventricules latéraux, thalamus et substance grise
+  sous-corticale**, le **percentile et le Z-score pour l'âge et le sexe**, avec le volume
+  médian attendu. Le résumé signale les valeurs hors normes (< P5, ou > P95 pour les
+  ventricules).
+
+Normes : modèles **BrainCharts** `lifespan_57K_82sites` (Rutherford et al., eLife 2022 ;
+~58 000 sujets sains, volumes FreeSurfer), licence GPL-3. Leur calcul est réimplémenté
+(pcntoolkit 0.30 ne s'installe plus en Python 3.13) et validé contre le code d'origine
+(écart < 10⁻¹⁴).
+
+> ⚠️ **Limites** : percentiles **indicatifs**, les normes n'étant **pas calibrées sur le
+> scanner local** (une calibration demande quelques dizaines de T1 3D normales de ce
+> scanner). Les volumes des **lobes** n'ont pas de normes publiées : volumes, % du volume
+> intracrânien et asymétrie seulement. Le volume intracrânien est estimé par SynthStrip.
+> Les T1 injectées sont ignorées. Sur CPU, compter de l'ordre de 5 à 10 minutes par examen
+> et ~8 Go de RAM (FastSurfer).
+
 ## Le modèle : FLAMeS
 
 [FLAMeS](https://doi.org/10.1101/2025.05.19.25327707) (*FLAIR Lesion Analysis in Multiple
@@ -199,6 +228,7 @@ src/segbrainmri/
 ├── models/         # flames.py (FLAMeS + SynthStrip), unet3d.py (référence), backends.py
 ├── dicom/          # series.py, writers.py (SEG, contours), network.py, query.py (antériorité)
 ├── longitudinal/   # compare.py (recalage, nouvelles lésions)
+├── volumetry/      # FastSurfer, lobes, normes BrainCharts, SEG + SR
 ├── service/        # config.py, worker.py, app.py (service `segbrainmri serve`)
 ├── preprocessing/  # pipeline générique NIfTI (pour le UNet3D de référence)
 ├── inference/      # fenêtre glissante, statistiques lésionnelles
