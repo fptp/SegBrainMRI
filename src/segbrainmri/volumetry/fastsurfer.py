@@ -106,6 +106,11 @@ class FastSurfer:
             "--no_cereb",
             "--no_hypothal",
             "--no_cc",
+            # Résolution standard de 1 mm : sinon FastSurfer travaille à la plus petite taille
+            # de voxel de l'image (ex. 0,47 mm sur une BRAVO -> cube 512³, mode expérimental,
+            # 8 fois plus de mémoire). Les normes BrainCharts sont aussi établies à 1 mm.
+            "--vox_size",
+            "1",
             "--device",
             "cuda" if self.device.startswith("cuda") else "cpu",
             "--py",
@@ -125,7 +130,15 @@ class FastSurfer:
         subjects = workdir / "subjects"
         start = time.perf_counter()
         logger.info("FastSurfer (segmentation) en cours...")
-        env = {**os.environ, "MPLBACKEND": "Agg", "FASTSURFER_HOME": str(self.home)}
+        env = {
+            **os.environ,
+            "MPLBACKEND": "Agg",
+            "FASTSURFER_HOME": str(self.home),
+            # FastSurfer lit sa version avec git ; le dépôt appartient à root, pas au service
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(self.home),
+        }
         proc = subprocess.run(
             self.command(t1_path, subjects),
             capture_output=True,

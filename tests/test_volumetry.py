@@ -228,6 +228,7 @@ def test_fastsurfer_command_and_missing_install(tmp_path):
     for flag in ("--seg_only", "--no_cereb", "--no_hypothal", "--no_cc"):
         assert flag in cmd
     assert cmd[cmd.index("--device") + 1] == "cpu"
+    assert cmd[cmd.index("--vox_size") + 1] == "1"  # jamais la résolution native (mémoire)
 
 
 def test_worker_routes_t1_to_volumetry(tmp_path):
