@@ -20,6 +20,7 @@ def write_mr_series(
     patient_id: str = "PHANTOM001",
     study_date: str = "20260101",
     origin: tuple[float, float, float] = (-50.0, -60.0, 0.0),
+    sex: str = "O",
 ) -> list[Path]:
     """Écrit ``volume`` ``(coupes, lignes, colonnes)`` en série MR mono-trame (uint16)."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -31,7 +32,7 @@ def write_mr_series(
     for k in order:
         ds = Dataset()
         ds.PatientName, ds.PatientID = "TEST^PHANTOM", patient_id
-        ds.PatientBirthDate, ds.PatientSex = "19800101", "O"
+        ds.PatientBirthDate, ds.PatientSex = "19800101", sex
         ds.StudyInstanceUID, ds.SeriesInstanceUID = study_uid, series_uid
         ds.SOPClassUID, ds.SOPInstanceUID = MRImageStorage, generate_uid()
         ds.FrameOfReferenceUID = frame_uid

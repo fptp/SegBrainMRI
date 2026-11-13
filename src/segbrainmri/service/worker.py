@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import SimpleITK as sitk
 
+from segbrainmri.core.device import get_device
 from segbrainmri.dicom.network import send_datasets
 from segbrainmri.dicom.query import Peer, PriorSeries, find_prior_flair, retrieve_series
 from segbrainmri.dicom.report import PriorInfo, build_report
@@ -44,6 +45,7 @@ from segbrainmri.longitudinal import (
 )
 from segbrainmri.models.backends import Analysis, LesionBackend, analyze
 from segbrainmri.service.config import ServiceConfig
+from segbrainmri.volumetry.engine import VolumetryEngine, is_t1_3d
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +224,55 @@ def process_series(
     return results
 
 
+def build_volumetry_engine(config: ServiceConfig) -> VolumetryEngine:
+    from segbrainmri.models.flames import SynthStrip
+    from segbrainmri.volumetry.fastsurfer import FastSurfer
+    from segbrainmri.volumetry.normative import NormativeLibrary
+
+    vol, device = config.volumetry, get_device(config.processing.device)
+    synth = config.model.models_dir / "synthstrip"
+    stripper = SynthStrip(
+        synth / "mri_synthstrip", synth / "synthstrip.1.pt", device, config.processing.threads
+    )
+    fastsurfer = FastSurfer(
+        vol.fastsurfer_dir,
+        vol.fastsurfer_python,
+        device=device.type,
+        threads=config.processing.threads,
+    )
+    try:
+        norms = NormativeLibrary(vol.norms_dir)
+    except FileNotFoundError:
+        logger.warning("Modèles normatifs absents (%s) : volumes sans percentiles.", vol.norms_dir)
+        norms = None
+    version_file = vol.fastsurfer_dir / "VERSION_SEGBRAINMRI"
+    version = version_file.read_text().strip() if version_file.is_file() else ""
+    return VolumetryEngine(
+        fastsurfer,
+        stripper,
+        norms,
+        fastsurfer_version=version,
+        tmp_root=config.processing.spool_dir / "tmp",
+    )
+
+
+def process_t1(
+    series_dir: Path, engine: VolumetryEngine, config: ServiceConfig, *, send: bool = True
+) -> list:
+    """Volumétrie d'une T1 3D : SEG des structures + compte rendu SR, envoyés à Orthanc."""
+    results = engine.run(load_series(series_dir))
+    if send:
+        o = config.orthanc
+        send_datasets(
+            results,
+            host=o.host,
+            port=o.port,
+            called_aet=o.ae_title,
+            calling_aet=config.listener.ae_title,
+        )
+    return results
+
+
 class SpoolWorker:
     """Surveille le dossier de réception et traite les séries une par une.
 
@@ -229,8 +280,14 @@ class SpoolWorker:
     ``failed/`` (séries en erreur + ``error.txt``) et ``done/`` si ``keep_inputs``.
     """
 
-    def __init__(self, config: ServiceConfig, backend: LesionBackend) -> None:
+    def __init__(
+        self,
+        config: ServiceConfig,
+        backend: LesionBackend,
+        volumetry: VolumetryEngine | None = None,
+    ) -> None:
         self.config, self.backend = config, backend
+        self._volumetry = volumetry
         root = config.processing.spool_dir
         self.incoming, self.processing = root / "incoming", root / "processing"
         self.failed, self.done = root / "failed", root / "done"
@@ -257,17 +314,20 @@ class SpoolWorker:
         series_dir.replace(work)
         try:
             header = read_header(next(work.glob("*.dcm")))
-            if is_our_output(header) or not is_flair(header, self.config.processing.flair_patterns):
-                logger.info(
-                    "Série ignorée (pas une FLAIR originale) : %s",
-                    header.get("SeriesDescription", "?"),
-                )
+            description = header.get("SeriesDescription", "?")
+            vol = self.config.volumetry
+            if not is_our_output(header) and is_flair(
+                header, self.config.processing.flair_patterns
+            ):
+                logger.info("Traitement de la FLAIR %s (%s)", description, work.name)
+                process_series(work, self.backend, self.config)
+            elif vol.enabled and is_t1_3d(header, vol.t1_patterns, vol.t1_exclude):
+                logger.info("Volumétrie de la T1 3D %s (%s)", description, work.name)
+                process_t1(work, self.volumetry_engine(), self.config)
+            else:
+                logger.info("Série ignorée (ni FLAIR ni T1 3D originale) : %s", description)
                 shutil.rmtree(work)
                 return
-            logger.info(
-                "Traitement de la série %s (%s)", header.get("SeriesDescription", "?"), work.name
-            )
-            process_series(work, self.backend, self.config)
         except Exception:
             logger.exception("Échec du traitement de %s", work.name)
             target = self.failed / work.name
@@ -280,6 +340,12 @@ class SpoolWorker:
             work.replace(self.done / work.name)
         else:
             shutil.rmtree(work)
+
+    def volumetry_engine(self) -> VolumetryEngine:
+        """Créé au premier besoin : le service démarre même si FastSurfer manque."""
+        if self._volumetry is None:
+            self._volumetry = build_volumetry_engine(self.config)
+        return self._volumetry
 
     def run_once(self) -> int:
         ready = self._ready()

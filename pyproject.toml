@@ -19,6 +19,7 @@ dependencies = [
     "numpy>=1.24",
     "SimpleITK>=2.3",
     "nibabel>=5.0",
+    "scipy>=1.10",
     # torch est installé séparément (roue CPU ou CUDA) : voir README.md
     "torch>=2.1",
     # Modèle FLAMeS (nnU-Net v2) et SynthStrip (surfa)

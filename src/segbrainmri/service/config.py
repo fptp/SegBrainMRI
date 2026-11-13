@@ -79,6 +79,32 @@ class LongitudinalConfig:
 
 
 @dataclass
+class VolumetryConfig:
+    #: Volumétrie des T1 3D (FastSurfer) avec comparaison aux normes par âge et sexe
+    enabled: bool = True
+    t1_patterns: list[str] = field(
+        default_factory=lambda: [
+            "bravo",
+            "mprage",
+            "mp-rage",
+            "spgr",
+            "t1[ _-]?3d",
+            "3d[ _-]?t1",
+            "t1w[ _-]?3d",
+            "3d[ _-]?tfe",
+            "t1[ _-]?tfe",
+        ]
+    )
+    #: T1 injectées exclues (FastSurfer est entraîné sur des T1 sans gadolinium)
+    t1_exclude: list[str] = field(
+        default_factory=lambda: ["gado", r"\bgd\b", r"\bpost\b", r"\+ ?c\b", "contrast", r"\binj"]
+    )
+    fastsurfer_dir: Path = Path("/opt/segbrainmri/fastsurfer")
+    fastsurfer_python: Path = Path("/opt/segbrainmri/fastsurfer-venv/bin/python")
+    norms_dir: Path = Path("/opt/segbrainmri/models/norms")
+
+
+@dataclass
 class ServiceConfig:
     listener: ListenerConfig = field(default_factory=ListenerConfig)
     orthanc: OrthancConfig = field(default_factory=OrthancConfig)
@@ -86,6 +112,7 @@ class ServiceConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     longitudinal: LongitudinalConfig = field(default_factory=LongitudinalConfig)
+    volumetry: VolumetryConfig = field(default_factory=VolumetryConfig)
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> ServiceConfig:
@@ -101,7 +128,13 @@ class ServiceConfig:
             if unknown:
                 raise ValueError(f"Clé(s) inconnue(s) dans [{section.name}] : {sorted(unknown)}")
             for key, value in values.items():
-                if key in ("spool_dir", "models_dir"):
+                if key in (
+                    "spool_dir",
+                    "models_dir",
+                    "fastsurfer_dir",
+                    "fastsurfer_python",
+                    "norms_dir",
+                ):
                     value = Path(value)
                 setattr(target, key, value)
         unknown_sections = set(raw) - {f.name for f in fields(cls)}
